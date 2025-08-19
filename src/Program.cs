@@ -1,9 +1,13 @@
-
-using CrashLogStarterKit;
+using System;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+using CrashLog_StarterKit.Services;
+using CrashLog_StarterKit.UI;
+using CrashLog_StarterKit.Forms;
 internal static class Program
 {
     [STAThread]
-    private static void Main(string[] args)
+    private static void Main()
     {
         //고해상도(HiDPI)에서 폰트/컨트롤이 뿌옇지 않도록 DPI 인식 모드를 시스템 기준으로 설정합니다.
         //(Windows가 처음 로그인할 때 결정한 DPI를 따릅니다.)
@@ -16,21 +20,12 @@ internal static class Program
         //성능/호환성 측면에서 WinForms 권장 기본값
         Application.SetCompatibleTextRenderingDefault(false);
 
-        // 1) 빌드 단계 기본값 결정
-        var defaultBehavior = GetBuildDefaultBehavior();
-
-        // 2) 명령줄/환경변수/App.config로 덮어쓰기
-        var behavior = ResolveCrashBehavior(args, defaultBehavior);
-
         //파일에 로그를 쓰는 구현
-        ILogSink logSink = new FileLogSink(appName: "CrashLogStarterKit");
-
-        //현재 실행 환경(OS/프로세스/메모리/DPI 등 정보 수집기)
-        IEnvironmentProbe probe = new EnvironmentProbe();
+        var logSink = new FileLogSink();
 
         //예외를 받아 메시지 구성 → 환경 정보 수집(EnvironmentProbe) → 파일로 기록 → (필요 시)
         //사용자에게 안내까지 담당하는 중심 클래스
-        var reporter = new CrashReporter(logSink, probe, behavior);
+        var reporter = new CrashReporter(logSink, new EnvironmentProbe());
 
         //WinForms 메시지 루프에서 발생한 UI 스레드 예외를 기본 크래시 대화상자 대신 Application.ThreadException 이벤트로 보내도록 설정합니다.
         //(이 줄이 있어야 아래 ThreadException 핸들러가 확실히 동작합니다.)
@@ -60,82 +55,5 @@ internal static class Program
         };
 
         Application.Run(new MainForm(reporter));
-    }
-
-    /// <summary>
-    /// 개발 단계 또는 배포 단계에 따라 프로그램 종료 설정
-    /// </summary>
-    /// <returns></returns>
-    private static CrashBehavior GetBuildDefaultBehavior()
-    {
-#if DEBUG
-        return CrashBehavior.Continue; // 개발 단계 기본
-#else
-            return CrashBehavior.Exit;     // 배포 단계 기본
-#endif
-    }
-    /// <summary>
-    /// 예외 발생 시 어떻게 처리할지 정책(CrashBehavior)을 결정해서 reporter에 넘겨주는 부분
-    /// Continue, Exit, ExitIfTerminating, PromptThenExit 중 하나
-    /// </summary>
-    /// <param name="args"></param>
-    /// <returns></returns>
-    private static CrashBehavior ResolveCrashBehavior(string[] args, CrashBehavior fallback)
-    {
-        // 1) 명령줄: /crash=exit | continue | exitIfTerminating | prompt
-        foreach (var a in args)
-        {
-            if (a.StartsWith("/crash=", StringComparison.OrdinalIgnoreCase))
-            {
-                var v = a.Substring("/crash=".Length);
-                if (TryParseBehavior(v, out var b)) return b;
-            }
-        }
-
-        // 2) 환경변수: APP_CRASH_BEHAVIOR
-        var env = Environment.GetEnvironmentVariable("APP_CRASH_BEHAVIOR");
-        if (!string.IsNullOrWhiteSpace(env) && TryParseBehavior(env, out var b2))
-            return b2;
-
-        // 3) App.config: <add key="CrashBehavior" value="exit" />
-        try
-        {
-            var cfg = System.Configuration.ConfigurationManager.AppSettings["CrashBehavior"];
-            if (!string.IsNullOrWhiteSpace(cfg) && TryParseBehavior(cfg, out var b3))
-                return b3;
-        }
-        catch { /* ConfigurationManager 미사용 가능 */ }
-
-        
-
-        // 4) 빌드 기본값
-        return fallback;
-
-        // return CrashBehavior.Exit; // 기본: 예외 시 즉시 종료
-    }
-
-    private static bool TryParseBehavior(string raw, out CrashBehavior behavior)
-    {
-        behavior = CrashBehavior.Exit;
-        if (string.IsNullOrWhiteSpace(raw)) return false;
-
-        var v = raw.Trim().ToLowerInvariant();
-        switch (v)
-        {
-            case "continue":
-                behavior = CrashBehavior.Continue; return true;
-            case "exit":
-                behavior = CrashBehavior.Exit; return true;
-            case "exitifterminating":
-            case "exit_if_terminating":
-            case "exit-if-terminating":
-                behavior = CrashBehavior.ExitIfTerminating; return true;
-            case "prompt":
-            case "promptthenexit":
-            case "prompt_then_exit":
-                behavior = CrashBehavior.PromptThenExit; return true;
-            default:
-                return false;
-        }
     }
 }

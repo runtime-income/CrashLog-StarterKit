@@ -1,8 +1,9 @@
 using System;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using CrashLog_StarterKit.Services;
 
-namespace CrashLogStarterKit
+namespace CrashLog_StarterKit.Forms
 {
     public partial class MainForm : Form
     {
@@ -25,7 +26,7 @@ namespace CrashLogStarterKit
             };
 
             var btnLog = new Button { Text = "로그 남기기", Dock = DockStyle.Top, Height = 40 };
-            //btnLog.Click += (s, e) => _reporter.Info("User clicked log");
+            btnLog.Click += (s, e) => _reporter.Info("User clicked log");
 
             Controls.Add(btnLog);
             Controls.Add(btnTask);

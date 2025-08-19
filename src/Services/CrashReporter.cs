@@ -1,92 +1,58 @@
-using Microsoft.VisualBasic.Logging;
 using System;
 using System.Text;
 using System.Windows.Forms;
 
-namespace CrashLogStarterKit
+namespace CrashLog_StarterKit.Services
 {
-    public enum CrashBehavior
-    {
-        Continue,          // 로그만 남기고 계속 실행
-        Exit,              // 항상 즉시 종료
-        ExitIfTerminating, // .NET이 종료하려는 상황일 때만 종료 (UnhandledException: isTerminating=true)
-        PromptThenExit     // 사용자에게 알리고 종료 (원하면 생략 가능)
-    }
-
-    /// <summary>
-    ///  CrashReporter는 예외가 발생하면 probe.Snapshot()을 호출해서 환경 정보를 로그에 첨부
-    /// </summary>
     public sealed class CrashReporter
     {
-        private readonly ILogSink _sink;
-        private readonly IEnvironmentProbe _probe;
-        private readonly CrashBehavior _behavior;
+        private readonly FileLogSink _log;
+        private readonly EnvironmentProbe _probe;
+        private int _handling;
 
-        public CrashReporter(ILogSink sink, IEnvironmentProbe probe, CrashBehavior behavior)
+        public CrashReporter(FileLogSink log, EnvironmentProbe probe)
         {
-            _sink = sink ?? throw new ArgumentNullException(nameof(sink));
+            _log = log ?? throw new ArgumentNullException(nameof(log));
             _probe = probe ?? throw new ArgumentNullException(nameof(probe));
-            _behavior = behavior;
         }
+
+        public void Info(string msg) => _log.Write("INFO", msg);
 
         public void Handle(string source, Exception ex, bool isTerminating = false)
         {
-            try
+            if (ex == null) ex = new Exception("Unknown exception");
+
+            if (System.Threading.Interlocked.Exchange(ref _handling, 1) == 1)
             {
-                var snapshot = _probe.Snapshot();
-                _sink.Write(DateTime.Now, source, ex, snapshot);
-                _sink.Flush();
-            }
-            catch
-            {
-                // 로깅 실패는 앱 생존에 영향 주지 않도록 무시
+                _log.Write("ERROR", $"Reentrant crash from {source}: {ex}");
+                return;
             }
 
-            switch (_behavior)
-            {
-                case CrashBehavior.Continue:
-                    // 아무것도 안 하고 계속 진행
-                    TryShowMessage(source, ex, isTerminating);
-                    break;
-
-                case CrashBehavior.ExitIfTerminating:
-                    if (isTerminating)
-                        ForceExit(1);
-                    break;
-
-                case CrashBehavior.Exit:
-                    TryShowMessage(source, ex, isTerminating);
-                    ForceExit(1);
-                    break;
-
-                case CrashBehavior.PromptThenExit:
-                    TryShowMessage(source,ex, isTerminating);
-                    ForceExit(1);
-                    break;
-            }
-        }
-
-        private void TryShowMessage(string source, Exception ex, bool isTerminating = false)
-        {
             try
             {
                 var env = _probe.Collect();
                 var body = BuildReport(source, ex, env, isTerminating);
-               
-                using (var dlg = new CrashDialog(body))
+                var path = _log.WriteCrash(body);
+
+                using (var dlg = new UI.CrashDialog(body, path))
                 {
                     dlg.ShowDialog();
                 }
             }
             catch (Exception inner)
             {
-               
+                try { _log.Write("FATAL", $"CrashReporter failed: {inner}"); } catch { }
             }
             finally
             {
-         
+                _handling = 0;
+                if (isTerminating)
+                {
+                    try { Application.Exit(); } catch { }
+                }
             }
         }
+
         private static string BuildReport(string source, Exception ex, string env, bool isTerminating)
         {
             var sb = new StringBuilder();
@@ -108,11 +74,6 @@ namespace CrashLogStarterKit
                 ie = ie.InnerException;
             }
             return sb.ToString();
-        }
-        private void ForceExit(int code)
-        {
-            try { _sink.Flush(); } catch { }
-            Environment.Exit(code); // 즉시 종료
         }
     }
 }
